@@ -1,4 +1,5 @@
-from aiogram import Bot, Dispatcher, executor, types
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
 import json
 import os
 from config import API_TOKEN
@@ -6,31 +7,66 @@ from config import API_TOKEN
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# Пути к файлам
-BASE_DIR = "/tmp"
-tasks_file = os.path.join(BASE_DIR, "tasks.json")
-user_map_file = os.path.join(BASE_DIR, "user_map.json")
+tasks_file = "tasks.json"
+user_map_file = "user_map.json"
 
-def load_json(path):
-    if os.path.exists(path):
-        with open(path, "r") as f:
+
+def load_tasks():
+    if os.path.exists(tasks_file):
+        with open(tasks_file, "r") as f:
             return json.load(f)
     return {}
 
-def save_json(path, data):
-    with open(path, "w") as f:
+
+def save_tasks(data):
+    with open(tasks_file, "w") as f:
         json.dump(data, f, indent=2)
 
+
+def load_user_map():
+    if os.path.exists(user_map_file):
+        with open(user_map_file, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def save_user_map(data):
+    with open(user_map_file, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+async def set_commands(bot: Bot):
+    commands = [
+        types.BotCommand(command="/start", description="Зарегистрироваться"),
+        types.BotCommand(command="/task", description="Поставить задачу"),
+        types.BotCommand(command="/mytasks", description="Показать мои задачи"),
+        types.BotCommand(command="/help", description="Помощь по командам"),
+        types.BotCommand(command="/info", description="О боте"),
+    ]
+    await bot.set_my_commands(commands)
+
+
 @dp.message_handler(commands=["start"])
-async def start(message: types.Message):
-    user_map = load_json(user_map_file)
-    username = message.from_user.username
-    if username:
-        user_map[username] = message.from_user.id
-        save_json(user_map_file, user_map)
-        await message.reply("✅ Ты зарегистрирован и можешь получать задачи.")
-    else:
-        await message.reply("❗ У тебя не установлен username в Telegram.")
+async def start_command(message: types.Message):
+    user_map = load_user_map()
+    user_map[message.from_user.username] = message.from_user.id
+    save_user_map(user_map)
+    await message.reply("Вы зарегистрированы и готовы получать задачи.")
+
+
+@dp.message_handler(commands=["help"])
+async def cmd_help(message: types.Message):
+    await message.reply("Список команд:\n"
+                        "/start — зарегистрироваться\n"
+                        "/task @username задача — поставить задачу\n"
+                        "/mytasks — показать мои задачи\n"
+                        "/info — информация о боте")
+
+
+@dp.message_handler(commands=["info"])
+async def cmd_info(message: types.Message):
+    await message.reply("Этот бот помогает ставить и отслеживать задачи внутри команды.")
+
 
 @dp.message_handler(commands=["task"])
 async def assign_task(message: types.Message):
@@ -38,32 +74,40 @@ async def assign_task(message: types.Message):
     if len(parts) < 3 or not parts[1].startswith("@"):
         await message.reply("Формат: /task @username Текст задачи")
         return
+
     username = parts[1][1:]
     task_text = parts[2]
     await process_task(message, username, task_text)
 
-@dp.message_handler(lambda m: m.text and m.text.startswith("@"))
+
+@dp.message_handler(lambda message: message.text and message.text.startswith("@"))
 async def assign_task_freeform(message: types.Message):
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
         return
+
     username = parts[0][1:]
     task_text = parts[1]
     await process_task(message, username, task_text)
 
+
 async def process_task(message, username, task_text):
-    tasks = load_json(tasks_file)
+    tasks = load_tasks()
+    user_map = load_user_map()
+
     tasks.setdefault(username, []).append({
         "from": message.from_user.username,
         "text": task_text,
         "status": "assigned"
     })
-    save_json(tasks_file, tasks)
+    save_tasks(tasks)
 
-    user_map = load_json(user_map_file)
     chat_id = user_map.get(username)
+    if not chat_id:
+        await message.reply("Не удалось отправить задачу. Сотрудник не зарегистрирован командой /start.")
+        return
 
-    if chat_id:
+    try:
         await bot.send_message(
             chat_id,
             f"Вам назначена задача от @{message.from_user.username}:\n\n{task_text}",
@@ -73,39 +117,44 @@ async def process_task(message, username, task_text):
             )
         )
         await message.reply("Задача отправлена сотруднику.")
-    else:
-        await message.reply("❌ Не удалось отправить задачу. Сотрудник не начал чат с ботом (/start).")
+    except Exception as e:
+        await message.reply(f"Ошибка при отправке задачи: {e}")
+
 
 @dp.callback_query_handler(lambda c: c.data.startswith(('done', 'decline')))
 async def handle_response(callback_query: types.CallbackQuery):
     action, username, task_text = callback_query.data.split("|")
-    tasks = load_json(tasks_file)
-    for t in tasks.get(username, []):
-        if t["text"] == task_text:
-            t["status"] = "done" if action == "done" else "declined"
-            save_json(tasks_file, tasks)
+    tasks = load_tasks()
 
-            user_map = load_json(user_map_file)
-            from_chat_id = user_map.get(t["from"])
-            if from_chat_id:
+    if username in tasks:
+        for t in tasks[username]:
+            if t["text"] == task_text:
+                t["status"] = "done" if action == "done" else "declined"
+                save_tasks(tasks)
                 await bot.send_message(
-                    from_chat_id,
+                    f"@{t['from']}",
                     f"@{username} {'выполнил' if action == 'done' else 'отклонил'} задачу:\n\"{task_text}\""
                 )
-            await callback_query.answer("Ответ зарегистрирован.")
-            return
+                await callback_query.answer("Ответ зарегистрирован.")
+                return
     await callback_query.answer("Ошибка задачи.")
+
 
 @dp.message_handler(commands=["mytasks"])
 async def show_tasks(message: types.Message):
     username = message.from_user.username
-    tasks = load_json(tasks_file).get(username, [])
+    tasks = load_tasks().get(username, [])
     if not tasks:
         await message.reply("У вас нет задач.")
         return
     text = "\n\n".join([f"• {t['text']} (статус: {t['status']})" for t in tasks])
     await message.reply(f"Ваши задачи:\n\n{text}")
 
+
+async def on_startup(dp):
+    await set_commands(bot)
+    print("✅ Бот успешно запущен и команды зарегистрированы")
+
+
 if __name__ == '__main__':
-    print("✅ Бот запущен")
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
