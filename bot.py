@@ -7,8 +7,8 @@ from config import API_TOKEN
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-tasks_file = "tasks.json"
-user_map_file = "user_map.json"
+tasks_file = "/data/tasks.json"
+user_map_file = "/data/user_map.json"
 
 
 def load_tasks():
