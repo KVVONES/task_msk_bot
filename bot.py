@@ -1,4 +1,3 @@
-
 from aiogram import Bot, Dispatcher, executor, types
 import json
 import os
@@ -55,9 +54,7 @@ async def process_task(message, username, task_text):
     try:
         await bot.send_message(
             f"@{username}",
-            f"Вам назначена задача от @{message.from_user.username}:
-
-{task_text}",
+            f"Вам назначена задача от @{message.from_user.username}:\n\n{task_text}",
             reply_markup=types.InlineKeyboardMarkup().add(
                 types.InlineKeyboardButton("✅ Выполнено", callback_data=f"done|{username}|{task_text}"),
                 types.InlineKeyboardButton("❌ Отказаться", callback_data=f"decline|{username}|{task_text}")
@@ -79,8 +76,7 @@ async def handle_response(callback_query: types.CallbackQuery):
                 save_tasks(tasks)
                 await bot.send_message(
                     f"@{t['from']}",
-                    f"@{username} {'выполнил' if action == 'done' else 'отклонил'} задачу:
-"{task_text}""
+                    f"@{username} {'выполнил' if action == 'done' else 'отклонил'} задачу:\n\"{task_text}\""
                 )
                 await callback_query.answer("Ответ зарегистрирован.")
                 return
