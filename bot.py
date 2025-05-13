@@ -93,4 +93,5 @@ async def show_tasks(message: types.Message):
     await message.reply(f"Ваши задачи:\n\n{text}")
 
 if __name__ == '__main__':
+    print("✅ Бот успешно запущен и слушает команды")
     executor.start_polling(dp, skip_updates=True)
